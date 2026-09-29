@@ -1,21 +1,25 @@
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
-import { router } from 'expo-router';
-import { useMemo, useState } from 'react';
+import { router, useLocalSearchParams } from 'expo-router';
+import { useState } from 'react';
 import { Pressable, ScrollView, View } from 'react-native';
 
 import { AppHeader } from '@/components/app-header';
 import { BookmarkButton } from '@/components/bookmark-button';
 import { Icon } from '@/components/ui/icon';
 import { Text, TextInput } from '@/components/ui/text';
+import { DIETS } from '@/data/household';
 import { imageSource } from '@/data/images';
-import { recipes, type Recipe } from '@/data/recipes';
+import type { Recipe } from '@/data/recipes';
 import { today } from '@/domain/dates';
 import { daysLeft, expiresPhrase, needsAttention, urgencyFor } from '@/domain/expiry';
 import { findFood } from '@/domain/foods';
-import { formatMoney, rankRecipes, type IngredientMatch, type RecipeMatch } from '@/domain/recipe-match';
+import { formatMoney } from '@/domain/format';
+import type { IngredientMatch, RecipeMatch } from '@/domain/recipe-match';
 import type { Urgency } from '@/domain/types';
 import { useActiveItems } from '@/store/pantry';
+import { useRankedRecipes, useRecipeCatalog } from '@/store/recipe-book';
+import { useSettings } from '@/store/settings';
 import { useShadow } from '@/theme/shadows';
 import { tone } from '@/theme/tones';
 
@@ -58,13 +62,22 @@ type Meal = 'all' | 'quick' | Recipe['meal'];
 export default function RecipesScreen() {
   const shadow = useShadow();
   const items = useActiveItems();
-  const [ingredient, setIngredient] = useState<string>('all');
+  const params = useLocalSearchParams<{ ingredient?: string }>();
+  const [ingredient, setIngredient] = useState<string>(params.ingredient ?? 'all');
+  // A nudge can deep-link here filtered to one item; apply it each time the param changes.
+  const [seenParam, setSeenParam] = useState(params.ingredient);
+  if (params.ingredient !== seenParam) {
+    setSeenParam(params.ingredient);
+    if (params.ingredient) setIngredient(params.ingredient);
+  }
   const [meal, setMeal] = useState<Meal>('all');
   const [search, setSearch] = useState('');
   const [searchTerms, setSearchTerms] = useState<string[]>([]);
 
   const now = today();
-  const ranked = useMemo(() => rankRecipes(recipes, items, now), [items, now]);
+  const ranked = useRankedRecipes();
+  const catalog = useRecipeCatalog();
+  const { diets } = useSettings();
   const expiring = items.filter((item) => needsAttention(item, now));
   const urgentCount = expiring.filter((item) => urgencyFor(daysLeft(item, now)) !== 'soon').length;
 
@@ -74,7 +87,7 @@ export default function RecipesScreen() {
   const rescueCents = rescued.reduce((sum, item) => sum + (item.priceCents ?? findFood(item.name)?.priceCents ?? 0), 0);
   const rescueKg = rescued.reduce((sum, item) => sum + (item.weightGrams ?? findFood(item.name)?.grams ?? 0), 0) / 1000;
 
-  const meals = [...new Set(recipes.map((recipe) => recipe.meal))];
+  const meals = [...new Set(catalog.map((recipe) => recipe.meal))];
 
   const visible = ranked.filter((match) => {
     const { recipe } = match;
@@ -124,6 +137,14 @@ export default function RecipesScreen() {
                 : 'Nothing is at risk right now — here is what your pantry can make.'}
             </Text>
           </View>
+          {diets.length > 0 && (
+            <Pressable onPress={() => router.push('/settings/pantry')} className="self-start flex-row items-center gap-1.5 px-3 py-1 rounded-full bg-surface-container-high dark:bg-surface-container">
+              <Icon name="filter_alt" className="text-[14px] text-primary" />
+              <Text className="font-label-sm text-label-sm text-on-surface-variant">
+                Showing {diets.map((diet) => DIETS.find((option) => option.value === diet)?.label ?? diet).join(', ').toLowerCase()} recipes
+              </Text>
+            </Pressable>
+          )}
           {rescueRecipes.length > 0 && (
             <View className="flex-row items-center gap-3 p-space-md rounded-2xl bg-secondary-container/25 dark:bg-[#3B2312] dark:border dark:border-[#5D361B]" style={shadow('sm')}>
               <View className="w-10 h-10 rounded-xl bg-secondary items-center justify-center shrink-0" style={shadow('sm')}>
@@ -205,7 +226,7 @@ export default function RecipesScreen() {
           <FeaturedCard match={featured} />
         ) : (
           <View className="items-center py-10 gap-2">
-            <Icon name="search_off" className="text-[32px] text-outline" />
+            <Icon name="search_off" className="text-[32px] text-outline dark:text-on-surface-variant" />
             <Text className="font-body-md text-body-md text-on-surface-variant text-center">No recipes match these filters yet.</Text>
           </View>
         )}
@@ -239,7 +260,7 @@ export default function RecipesScreen() {
           <View className="flex-col gap-2.5">
             <View className="relative flex-row items-center">
               <View className="absolute left-3 z-10">
-                <Icon name="search" className="text-[18px] text-outline" />
+                <Icon name="search" className="text-[18px] text-outline dark:text-on-surface-variant" />
               </View>
               <TextInput
                 value={search}

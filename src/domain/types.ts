@@ -61,6 +61,12 @@ export type ItemEvent = {
   valueCents: number;
   grams: number;
   at: string;
+  /** Older ledger entries may lack these. */
+  category?: CategoryId;
+  /** Days until expiry when the event happened (negative = past date). */
+  daysLeft?: number;
+  /** Set when the food was used by cooking a recipe. */
+  recipeId?: string;
 };
 
 export type Urgency = 'expired' | 'urgent' | 'soon' | 'fresh';

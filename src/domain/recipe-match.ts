@@ -79,13 +79,14 @@ export function matchRecipe(recipe: Recipe, pantry: Map<string, PantryItem[]>, n
 }
 
 /** Recipes ranked so the ones rescuing the most urgent food come first. */
-export function rankRecipes(recipes: Recipe[], items: PantryItem[], now = today()) {
+export function rankRecipes(recipes: Recipe[], items: PantryItem[], now = today(), stars: Record<string, number> = {}) {
   const pantry = indexPantry(items);
   return recipes
-    .map((recipe) => matchRecipe(recipe, pantry, now))
+    .map((recipe) => {
+      const match = matchRecipe(recipe, pantry, now);
+      // Loved recipes get a gentle nudge up; disliked ones drift down.
+      const rating = stars[recipe.id];
+      return rating ? { ...match, score: match.score + (rating - 3) * 15 } : match;
+    })
     .sort((a, b) => b.score - a.score || a.recipe.minutes - b.recipe.minutes);
-}
-
-export function formatMoney(cents: number) {
-  return `$${(cents / 100).toFixed(2)}`;
 }

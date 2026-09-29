@@ -12,7 +12,7 @@ import {
 
 import { useTheme } from '@/theme/theme-provider';
 import { jakartaFamilyFor } from '@/theme/fonts';
-import { colorTokens } from '@/theme/palette';
+import { colorTokens, withAlpha } from '@/theme/palette';
 
 const SIZE_CLASS = /(^|\s)text-(headline|body|label|xs|sm|base|lg|xl|\d?xl|\[\d)/;
 const COLOR_CLASS = new RegExp(
@@ -64,12 +64,13 @@ export const TextInput = forwardRef<RNTextInput, TextInputProps>(function TextIn
   { className, placeholderTextColor, ...props },
   ref
 ) {
-  const { colors } = useTheme();
+  const { colors, scheme } = useTheme();
   return (
     <FontTextInput
       ref={ref}
       className={withTextDefaults(`outline-none ${className ?? ''}`)}
-      placeholderTextColor={placeholderTextColor ?? colors.outline}
+      // Dark `outline` is a border tone, too faint for text; the dark exports use the secondary text color.
+      placeholderTextColor={placeholderTextColor ?? (scheme === 'dark' ? withAlpha(colors['on-surface-variant'], 0.75) : colors.outline)}
       {...props}
     />
   );

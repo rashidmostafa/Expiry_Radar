@@ -1,15 +1,16 @@
 import Constants from 'expo-constants';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useState } from 'react';
+import { router } from 'expo-router';
 import { Pressable, ScrollView, View } from 'react-native';
 
 import { AppHeader } from '@/components/app-header';
 import { Avatar } from '@/components/avatar';
 import { Icon, type IconName } from '@/components/ui/icon';
-import { Sheet, SheetOption } from '@/components/ui/sheet';
-import { Text, TextInput } from '@/components/ui/text';
+import { Text } from '@/components/ui/text';
 import { pickPhoto } from '@/services/photos';
-import { rescheduleNudges, summarize, useActiveItems, useEvents, zeroWasteStreak } from '@/store/pantry';
+import { signOut, useAccount } from '@/store/account';
+import { summarize, useActiveItems, useEvents, zeroWasteStreak } from '@/store/pantry';
+import { useRestock } from '@/store/restock';
 import { updateSettings, useSettings, type ThemePreference } from '@/store/settings';
 import { useShadow } from '@/theme/shadows';
 import { useTheme } from '@/theme/theme-provider';
@@ -20,10 +21,6 @@ const THEMES: { value: ThemePreference; label: string; icon: IconName }[] = [
   { value: 'light', label: 'Light', icon: 'light_mode' },
   { value: 'dark', label: 'Dark', icon: 'dark_mode' },
 ];
-
-function formatHour(hour: number) {
-  return `${hour % 12 === 0 ? 12 : hour % 12}:00 ${hour < 12 ? 'AM' : 'PM'}`;
-}
 
 function monthStart() {
   const now = new Date();
@@ -36,8 +33,9 @@ export default function ProfileScreen() {
   const settings = useSettings();
   const items = useActiveItems();
   const events = useEvents();
-  const [sheet, setSheet] = useState<'name' | 'theme' | 'alerts' | undefined>();
-  const [name, setName] = useState(settings.userName);
+  const restock = useRestock();
+  const account = useAccount();
+  const listCount = restock.entries.filter((entry) => !entry.inCart).length;
 
   const lifetime = summarize(items, events);
   const month = summarize(items, events, monthStart());
@@ -56,7 +54,7 @@ export default function ProfileScreen() {
           </View>
           <Pressable
             accessibilityLabel="Quick settings"
-            onPress={() => setSheet('theme')}
+            onPress={() => router.push('/settings/pantry')}
             className="w-10 h-10 rounded-full bg-surface-container-low dark:bg-surface-container items-center justify-center active:scale-95"
             style={shadow('sm')}>
             <Icon name="tune" className="text-[20px] text-on-surface-variant" />
@@ -80,12 +78,14 @@ export default function ProfileScreen() {
               <Icon name="photo_camera" className="text-[16px] text-on-primary" />
             </Pressable>
           </View>
-          <Pressable onPress={() => { setName(settings.userName); setSheet('name'); }}>
+          <Pressable onPress={() => router.push('/settings/profile')}>
             <Text className="font-headline-sm text-headline-sm text-on-surface leading-tight text-center">
               {settings.userName || 'Add your name'}
             </Text>
           </Pressable>
-          <Text className="font-body-sm text-body-sm text-on-surface-variant mt-0.5">Local pantry • stored on this device</Text>
+          <Text className="font-body-sm text-body-sm text-on-surface-variant mt-0.5">
+            {account.user?.email ?? 'Local pantry • stored on this device'}
+          </Text>
           <View className="mt-space-sm flex-row items-center gap-1.5 px-3 py-1 rounded-full bg-primary-fixed/40 dark:bg-[#1C382B] dark:border dark:border-[#2B5440]">
             <Icon name="eco" filled className="text-[15px] text-primary" />
             <Text className="font-label-sm text-label-sm text-on-primary-fixed dark:text-primary">{rank} • Household Lead</Text>
@@ -101,7 +101,10 @@ export default function ProfileScreen() {
               </View>
               <Text className="font-label-lg text-label-lg text-on-surface">Lifetime Impact</Text>
             </View>
-            <Text className="font-label-sm text-label-sm text-primary font-semibold">Updated Today</Text>
+            <Pressable onPress={() => router.push('/insights')} className="flex-row items-center gap-0.5">
+              <Text className="font-label-sm text-label-sm text-primary font-semibold">Full report</Text>
+              <Icon name="chevron_right" className="text-[16px] text-primary" />
+            </Pressable>
           </View>
           <View className="flex-row flex-wrap gap-space-sm">
             <ImpactStat label="Rescued" icon="inventory_2" value={String(lifetime.rescuedItems)} unit="items" />
@@ -137,73 +140,57 @@ export default function ProfileScreen() {
 
         {/* Account & Preferences */}
         <Group title="Account & Preferences">
-          <Row icon="person" title="Edit Profile" detail="Name and photo" onPress={() => { setName(settings.userName); setSheet('name'); }} />
+          <Row icon="person" title="Edit Profile" detail="Name, handle and photo" onPress={() => router.push('/settings/profile')} />
           <Row
             icon="shelves"
             title="Pantry Settings"
-            detail={`Theme: ${THEMES.find((theme) => theme.value === settings.theme)?.label}`}
-            onPress={() => setSheet('theme')}
+            detail={`Default zones, ${settings.units}, ${THEMES.find((theme) => theme.value === settings.theme)?.label.toLowerCase()} theme`}
+            onPress={() => router.push('/settings/pantry')}
           />
-          <Row icon="group" title="Household Management" detail="Share one pantry with your household" soon />
+          <Row
+            icon="group"
+            title="Household Management"
+            detail={account.household ? `${account.household.name} · ${account.members.length} ${account.members.length === 1 ? 'member' : 'members'}` : 'Share one pantry with your household'}
+            onPress={() => router.push('/household')}
+          />
           <Row
             icon="notification_add"
             title="Alert Configuration"
-            detail={`${settings.alertDaysBefore}-day early warning at ${formatHour(settings.alertHour)}`}
-            onPress={() => setSheet('alerts')}
+            detail={`${settings.alertDaysBefore}-day early warning, smart nudges`}
+            onPress={() => router.push('/settings/alerts')}
             last
           />
         </Group>
 
         <Group title="Integrations & Utilities">
+          <Row icon="insights" title="Waste & Savings Report" detail="Weekly impact, trends and milestones" onPress={() => router.push('/insights')} />
+          <Row icon="shopping_cart" title="Restock List" detail={listCount ? `${listCount} ${listCount === 1 ? 'item' : 'items'} on your list` : 'Used-up items and staples'} onPress={() => router.push('/restock')} />
           <Row icon="storefront" title="Connected Stores & Loyalty" detail="Import receipts automatically" soon />
           <Row icon="support_agent" title="Help & Support" detail="FAQ and guides" soon last />
         </Group>
+
+        {account.user ? (
+          <Group title="Account">
+            <Row icon="logout" title="Log Out" detail="Your pantry stays on this phone" onPress={() => void signOut()} last />
+          </Group>
+        ) : (
+          <Pressable onPress={() => router.push('/auth/login')} className={`flex-row items-center gap-3 p-4 rounded-2xl ${tone.card}`} style={shadow('sm')}>
+            <View className={`w-10 h-10 rounded-xl items-center justify-center ${tone.freshBg}`}>
+              <Icon name="login" className="text-[20px] text-primary" />
+            </View>
+            <View className="flex-1">
+              <Text className="font-label-lg text-label-lg text-primary">Log In or Create Account</Text>
+              <Text className="font-body-sm text-body-sm text-on-surface-variant">Optional — share a pantry and read receipts</Text>
+            </View>
+            <Icon name="chevron_right" className="text-[20px] text-primary" />
+          </Pressable>
+        )}
 
         <Text className="font-label-sm text-label-sm text-on-surface-variant text-center pt-2">
           Expiry Radar v{Constants.expoConfig?.version ?? '1.0.0'} • Waste less, save more
         </Text>
       </ScrollView>
 
-      <Sheet visible={sheet === 'name'} onClose={() => setSheet(undefined)} title="Your name" subtitle="Used for your morning greeting.">
-        <TextInput
-          value={name}
-          onChangeText={setName}
-          autoFocus
-          placeholder="First name"
-          onSubmitEditing={() => { updateSettings({ userName: name.trim() }); setSheet(undefined); }}
-          className="h-12 px-4 rounded-xl bg-surface-container-low dark:bg-surface-container font-body-md text-body-md text-on-surface"
-        />
-        <Pressable
-          onPress={() => { updateSettings({ userName: name.trim() }); setSheet(undefined); }}
-          className="mt-2 h-12 rounded-xl bg-primary items-center justify-center">
-          <Text className="font-label-lg text-label-lg text-on-primary">Save</Text>
-        </Pressable>
-      </Sheet>
-
-      <Sheet visible={sheet === 'theme'} onClose={() => setSheet(undefined)} title="Appearance">
-        {THEMES.map((theme) => (
-          <SheetOption
-            key={theme.value}
-            icon={theme.icon}
-            label={theme.label}
-            selected={settings.theme === theme.value}
-            onPress={() => updateSettings({ theme: theme.value })}
-          />
-        ))}
-      </Sheet>
-
-      <Sheet visible={sheet === 'alerts'} onClose={() => setSheet(undefined)} title="Smart nudges" subtitle="When should the radar remind you?">
-        <View className="flex-row gap-2">
-          {[1, 2, 3].map((days) => (
-            <Choice key={days} label={days === 1 ? '1 day before' : `${days} days before`} active={settings.alertDaysBefore === days} onPress={() => { updateSettings({ alertDaysBefore: days }); rescheduleNudges(); }} />
-          ))}
-        </View>
-        <View className="flex-row gap-2">
-          {[7, 8, 12, 18].map((hour) => (
-            <Choice key={hour} label={formatHour(hour)} active={settings.alertHour === hour} onPress={() => { updateSettings({ alertHour: hour }); rescheduleNudges(); }} />
-          ))}
-        </View>
-      </Sheet>
     </View>
   );
 }
@@ -264,12 +251,3 @@ function Row({ icon, title, detail, onPress, soon, last }: { icon: IconName; tit
   );
 }
 
-function Choice({ label, active, onPress }: { label: string; active: boolean; onPress: () => void }) {
-  return (
-    <Pressable
-      onPress={onPress}
-      className={`flex-1 h-10 rounded-xl items-center justify-center ${active ? 'bg-primary' : 'bg-surface-container-low dark:bg-surface-container'}`}>
-      <Text className={`font-label-md text-label-md ${active ? 'text-on-primary' : 'text-on-surface'}`}>{label}</Text>
-    </Pressable>
-  );
-}

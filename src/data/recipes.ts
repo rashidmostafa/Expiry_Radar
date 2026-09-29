@@ -1,4 +1,5 @@
 import type { IconName } from '@/components/ui/icon';
+import type { DietId } from '@/store/settings';
 
 export type RecipeIngredient = {
   /** Food key from domain/foods — how the pantry is matched. */
@@ -28,6 +29,8 @@ export type Recipe = {
   proteinGrams?: number;
   difficulty: 'Easy Prep' | 'Medium' | 'Weekend Project';
   servings: number;
+  /** Diets this recipe fits as written (optional garnishes excluded). */
+  diets: DietId[];
   ingredients: RecipeIngredient[];
   tools: { icon: IconName; name: string }[];
   steps: RecipeStep[];
@@ -47,6 +50,7 @@ export const recipes: Recipe[] = [
     kcal: 290,
     difficulty: 'Easy Prep',
     servings: 2,
+    diets: ['vegetarian', 'pescatarian', 'gluten-free', 'nut-free'],
     ingredients: [
       { key: 'spinach', name: 'Baby Spinach', amount: '2 cups', deduct: 0.5 },
       { key: 'eggs', name: 'Large Eggs', amount: '4 eggs', deduct: 0.34 },
@@ -94,6 +98,7 @@ export const recipes: Recipe[] = [
     kcal: 240,
     difficulty: 'Easy Prep',
     servings: 1,
+    diets: ['vegetarian', 'pescatarian', 'gluten-free'],
     ingredients: [
       { key: 'spinach', name: 'Baby Spinach', amount: '1 cup', deduct: 0.25 },
       { key: 'yogurt', name: 'Greek Yogurt', amount: '½ cup', deduct: 0.25 },
@@ -134,6 +139,7 @@ export const recipes: Recipe[] = [
     proteinGrams: 18,
     difficulty: 'Easy Prep',
     servings: 1,
+    diets: ['vegetarian', 'pescatarian'],
     ingredients: [
       { key: 'strawberries', name: 'Strawberries', amount: '1 cup', deduct: 0.5 },
       { key: 'yogurt', name: 'Greek Yogurt', amount: '¾ cup', deduct: 0.3 },
@@ -168,6 +174,7 @@ export const recipes: Recipe[] = [
     kcal: 230,
     difficulty: 'Easy Prep',
     servings: 3,
+    diets: ['vegan', 'vegetarian', 'pescatarian', 'gluten-free', 'dairy-free', 'nut-free'],
     ingredients: [
       { key: 'avocado', name: 'Ripe Avocados', amount: '2', deduct: 1 },
       { key: 'lime', name: 'Lime', amount: '1', deduct: 0.5 },
@@ -210,6 +217,7 @@ export const recipes: Recipe[] = [
     kcal: 210,
     difficulty: 'Easy Prep',
     servings: 4,
+    diets: ['vegan', 'vegetarian', 'pescatarian', 'gluten-free', 'dairy-free', 'nut-free'],
     ingredients: [
       { key: 'squash', name: 'Butternut Squash', amount: '1 small', deduct: 1 },
       { key: 'apple', name: 'Honeycrisp Apples', amount: '2', deduct: 0.34 },
@@ -243,6 +251,7 @@ export const recipes: Recipe[] = [
     kcal: 380,
     difficulty: 'Medium',
     servings: 4,
+    diets: ['vegetarian', 'pescatarian', 'nut-free'],
     ingredients: [
       { key: 'bread', name: 'Sourdough Loaf', amount: '6 slices', deduct: 0.6 },
       { key: 'eggs', name: 'Eggs', amount: '4', deduct: 0.34 },
@@ -285,6 +294,7 @@ export const recipes: Recipe[] = [
     kcal: 140,
     difficulty: 'Easy Prep',
     servings: 2,
+    diets: ['vegan', 'vegetarian', 'pescatarian', 'gluten-free', 'dairy-free'],
     ingredients: [
       { key: 'spinach', name: 'Baby Spinach', amount: '1 bag', deduct: 1 },
       { key: 'garlic', name: 'Garlic', amount: '3 cloves', deduct: 0.25 },
@@ -315,4 +325,9 @@ export function getRecipe(id: string) {
 
 export function recipesUsing(foodKey: string) {
   return recipes.filter((recipe) => recipe.ingredients.some((ingredient) => ingredient.key === foodKey));
+}
+
+/** A recipe fits when it satisfies every diet the household follows. */
+export function fitsDiets(recipe: Recipe, diets: DietId[]) {
+  return diets.every((diet) => recipe.diets.includes(diet));
 }

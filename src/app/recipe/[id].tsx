@@ -12,12 +12,16 @@ import { Icon } from '@/components/ui/icon';
 import { Switch } from '@/components/ui/switch';
 import { Text } from '@/components/ui/text';
 import { imageSource } from '@/data/images';
-import { getRecipe, recipes, type Recipe } from '@/data/recipes';
+import { getRecipe, type Recipe } from '@/data/recipes';
 import { daysBetween, today } from '@/domain/dates';
 import { expiresPhrase } from '@/domain/expiry';
-import { formatMoney, indexPantry, matchRecipe, rankRecipes, type IngredientMatch } from '@/domain/recipe-match';
+import { formatMoney } from '@/domain/format';
+import { indexPantry, matchRecipe, type IngredientMatch } from '@/domain/recipe-match';
 import { zones } from '@/domain/categories';
 import { cookDeductions, useActiveItems } from '@/store/pantry';
+import { useRankedRecipes } from '@/store/recipe-book';
+import { addToRestock, useRestock } from '@/store/restock';
+import { useSettings } from '@/store/settings';
 import { useShadow } from '@/theme/shadows';
 import { useTheme } from '@/theme/theme-provider';
 import { tone } from '@/theme/tones';
@@ -44,9 +48,10 @@ function RecipeDetail({ recipe }: { recipe: Recipe }) {
   const { colors } = useTheme();
   const items = useActiveItems();
   const match = useMemo(() => matchRecipe(recipe, indexPantry(items)), [recipe, items]);
-  const isTopPick = useMemo(() => rankRecipes(recipes, items)[0]?.recipe.id === recipe.id, [items, recipe.id]);
+  const isTopPick = useRankedRecipes()[0]?.recipe.id === recipe.id;
 
-  const [servings, setServings] = useState(recipe.servings);
+  const { householdSize } = useSettings();
+  const [servings, setServings] = useState(householdSize);
   const [autoDeduct, setAutoDeduct] = useState(true);
   const [done, setDone] = useState<Set<number>>(new Set());
   const [skipped, setSkipped] = useState<Set<string>>(new Set());
@@ -66,15 +71,13 @@ function RecipeDetail({ recipe }: { recipe: Recipe }) {
   const deductible = match.ingredients.filter((entry) => entry.item && !skipped.has(entry.ingredient.key) && entry.ingredient.deduct > 0);
 
   const cook = () => {
-    const grams = autoDeduct
-      ? cookDeductions(
-          deductible.map((entry) => ({ id: entry.item!.id, percent: Math.max(1, Math.round(entry.ingredient.deduct * scale * 100)) }))
-        )
-      : 0;
-    router.dismissTo({
-      pathname: '/inventory',
-      params: { cooked: recipe.id, count: String(autoDeduct ? deductible.length : 0), grams: String(grams), at: String(Date.now()) },
-    });
+    cookDeductions(
+      autoDeduct
+        ? deductible.map((entry) => ({ id: entry.item!.id, percent: Math.max(1, Math.round(entry.ingredient.deduct * scale * 100)) }))
+        : [],
+      recipe.id
+    );
+    router.replace({ pathname: '/cook/done', params: { recipe: recipe.id } });
   };
 
   const share = () => {
@@ -266,9 +269,18 @@ function RecipeDetail({ recipe }: { recipe: Recipe }) {
 
         {/* Step-by-Step Instructions */}
         <View className="flex-col gap-space-sm">
-          <View className="px-1">
-            <Text className="font-headline-sm text-headline-sm text-on-surface font-bold">Preparation Steps</Text>
-            <Text className="font-label-sm text-label-sm text-on-surface-variant">Follow along or check off as you cook</Text>
+          <View className="flex-row items-center justify-between px-1">
+            <View className="flex-1">
+              <Text className="font-headline-sm text-headline-sm text-on-surface font-bold">Preparation Steps</Text>
+              <Text className="font-label-sm text-label-sm text-on-surface-variant">Follow along or check off as you cook</Text>
+            </View>
+            <Pressable
+              onPress={() => router.push(`/cook/${recipe.id}`)}
+              className="flex-row items-center gap-1 bg-surface-container dark:bg-surface-container-high px-3 py-1.5 rounded-full"
+              style={shadow('sm')}>
+              <Icon name="play_circle" className="text-[18px] text-primary" />
+              <Text className="font-label-md text-label-md text-primary">Hands-Free</Text>
+            </Pressable>
           </View>
           {recipe.steps.map((step, index) => {
             const isDone = done.has(index);
@@ -389,6 +401,8 @@ function RoundStep({ icon, label, onPress }: { icon: 'add' | 'remove'; label: st
 }
 
 function IngredientRow({ entry, checked, onToggle }: { entry: IngredientMatch; checked: boolean; onToggle: (checked: boolean) => void }) {
+  const restock = useRestock();
+  const listed = restock.entries.some((entry) => !entry.inCart && entry.name.toLowerCase() === ingredient.name.toLowerCase());
   const shadow = useShadow();
   const { ingredient, item, urgency, days } = entry;
 
@@ -438,10 +452,12 @@ function IngredientRow({ entry, checked, onToggle }: { entry: IngredientMatch; c
         <View className="flex-row items-center gap-2 pl-2">
           <Text className="font-label-md text-label-md text-on-surface">{ingredient.amount}</Text>
           <Pressable
-            onPress={() => router.push({ pathname: '/add-item', params: { name: ingredient.name } })}
-            className="bg-surface-container dark:bg-surface-container-high px-2 py-1 rounded-full flex-row items-center gap-0.5">
-            <Icon name="add_shopping_cart" className="text-[14px] text-on-surface" />
-            <Text className="font-label-sm text-label-sm text-on-surface">Add</Text>
+            accessibilityLabel={listed ? `${ingredient.name} is on your restock list` : `Add ${ingredient.name} to restock list`}
+            disabled={listed}
+            onPress={() => addToRestock({ name: ingredient.name, reason: 'recipe' })}
+            className={`px-2 py-1 rounded-full flex-row items-center gap-0.5 ${listed ? tone.freshBg : 'bg-surface-container dark:bg-surface-container-high'}`}>
+            <Icon name={listed ? 'check' : 'add_shopping_cart'} className={`text-[14px] ${listed ? 'text-primary' : 'text-on-surface'}`} />
+            <Text className={`font-label-sm text-label-sm ${listed ? 'text-primary' : 'text-on-surface'}`}>{listed ? 'Listed' : 'Add'}</Text>
           </Pressable>
         </View>
       )}

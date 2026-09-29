@@ -12,15 +12,16 @@ import { Sheet, SheetOption } from '@/components/ui/sheet';
 import { Switch } from '@/components/ui/switch';
 import { Text, TextInput } from '@/components/ui/text';
 import { imageSource } from '@/data/images';
-import { recipesUsing } from '@/data/recipes';
 import { alertTitle, describeAlert } from '@/domain/alerts';
 import { categories, zoneOrder, zones } from '@/domain/categories';
 import { daysBetween, formatShort, today } from '@/domain/dates';
 import { daysLeft, expiryBadge, longCountdown, urgencyFor } from '@/domain/expiry';
 import { findFood } from '@/domain/foods';
-import { formatMoney, indexPantry, matchRecipe } from '@/domain/recipe-match';
+import { formatMoney } from '@/domain/format';
+import { indexPantry, matchRecipe } from '@/domain/recipe-match';
 import type { PantryItem, Urgency, Zone } from '@/domain/types';
 import { consumePortion, freezeItem, markUsed, removeItem, tossItem, updateItem, useActiveItems, useItem } from '@/store/pantry';
+import { useRecipeCatalog } from '@/store/recipe-book';
 import { useSettings } from '@/store/settings';
 import { useShadow } from '@/theme/shadows';
 import { useTheme } from '@/theme/theme-provider';
@@ -84,13 +85,15 @@ function ItemDetails({ item }: { item: PantryItem }) {
   const tip = food?.tip ?? GENERIC_TIP;
   const alertWhen = describeAlert(item.expiresOn, settings.alertDaysBefore, settings.alertHour);
 
+  const catalog = useRecipeCatalog();
   const matches = useMemo(() => {
     if (!food) return [];
     const index = indexPantry(pantry);
-    return recipesUsing(food.key)
+    return catalog
+      .filter((recipe) => recipe.ingredients.some((ingredient) => ingredient.key === food.key))
       .map((recipe) => matchRecipe(recipe, index))
       .sort((a, b) => b.score - a.score);
-  }, [food, pantry]);
+  }, [catalog, food, pantry]);
   const ready = matches.filter((match) => match.readyPct === 100).length;
 
   const leave = (action: () => void) => {

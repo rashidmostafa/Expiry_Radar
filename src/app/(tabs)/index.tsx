@@ -10,14 +10,15 @@ import { Icon } from '@/components/ui/icon';
 import { Text } from '@/components/ui/text';
 import { UrgencyPill, urgencyTone } from '@/components/urgency';
 import { imageSource } from '@/data/images';
-import { recipes, recipesUsing } from '@/data/recipes';
+import { recipesUsing } from '@/data/recipes';
 import { categories } from '@/domain/categories';
 import { greeting, today } from '@/domain/dates';
 import { daysLeft, expiresPhrase, needsAttention, relativeExpiry, shortCountdown, urgencyFor } from '@/domain/expiry';
 import { findFood } from '@/domain/foods';
-import { rankRecipes } from '@/domain/recipe-match';
 import type { PantryItem } from '@/domain/types';
 import { freezeItem, markUsed, summarize, useActiveItems, useEvents, zeroWasteStreak } from '@/store/pantry';
+import { useRankedRecipes } from '@/store/recipe-book';
+import { seedDemoKitchen } from '@/store/seed';
 import { useSettings } from '@/store/settings';
 import { useShadow } from '@/theme/shadows';
 import { tone } from '@/theme/tones';
@@ -40,7 +41,7 @@ export default function HomeScreen() {
   const upcoming = items.filter((item) => daysLeft(item, now) <= 7).slice(0, 8);
   const month = summarize(items, events, monthStart());
   const streak = zeroWasteStreak(events, items);
-  const nudge = rankRecipes(recipes, items, now).find((match) => match.rescues.length > 0);
+  const nudge = useRankedRecipes().find((match) => match.rescues.length > 0);
   const tip = attention.map((item) => findFood(item.name)?.tip).find(Boolean) ?? FALLBACK_TIP;
 
   return (
@@ -61,7 +62,9 @@ export default function HomeScreen() {
             <View className="flex-row items-center gap-1.5 mt-0.5">
               <View className="w-2 h-2 rounded-full bg-secondary-container dark:bg-secondary" />
               <Text className="font-body-md text-body-md text-on-surface-variant">
-                {attention.length === 0
+                {items.length === 0
+                  ? "Let's fill up your radar"
+                  : attention.length === 0
                   ? 'Everything is fresh this week'
                   : `${attention.length} ${attention.length === 1 ? 'item needs' : 'items need'} attention this week`}
               </Text>
@@ -80,11 +83,15 @@ export default function HomeScreen() {
           </Pressable>
         </View>
 
+        {items.length === 0 ? (
+          <EmptyKitchen />
+        ) : (
+          <>
         {/* Quick Stats Counter Row */}
         <View className="flex-row gap-space-sm">
           <StatCard icon="inventory_2" tile="bg-surface-container-low" iconColor="text-primary" value={String(items.length)} label="Pantry Items" onPress={() => router.navigate('/inventory')} />
           <StatCard icon="timer" tile={tone.coralTile} iconColor="text-tertiary" valueColor="text-tertiary" value={String(attention.length)} label="Expiring Soon" onPress={() => router.navigate('/inventory')} />
-          <StatCard icon="savings" tile={tone.amberTile} iconColor="text-secondary" value={`$${Math.round(month.savedCents / 100)}`} label="Saved Month" onPress={() => router.navigate('/profile')} />
+          <StatCard icon="savings" tile={tone.amberTile} iconColor="text-secondary" value={`$${Math.round(month.savedCents / 100)}`} label="Saved Month" onPress={() => router.push('/insights')} />
         </View>
 
         {/* Smart Cooking Nudge Card */}
@@ -222,11 +229,14 @@ export default function HomeScreen() {
               <Icon name="verified" className="text-[16px] text-primary" />
               <Text className="font-label-sm text-label-sm text-on-surface-variant">Smart nudges keep watch for you</Text>
             </View>
-            <Pressable onPress={() => router.navigate('/profile')}>
+            <Pressable onPress={() => router.push('/insights')}>
               <Text className="font-label-sm text-label-sm text-primary font-semibold">History</Text>
             </Pressable>
           </View>
         </View>
+
+          </>
+        )}
 
         {/* Gentle Domestic Delight Note */}
         <View className={`p-3 rounded-xl flex-row items-center justify-center gap-2 ${tone.inset} dark:border-outline-variant/60`}>
@@ -343,5 +353,31 @@ function ExpiringCard({ item }: { item: PantryItem }) {
         </Pressable>
       </View>
     </Pressable>
+  );
+}
+
+function EmptyKitchen() {
+  const shadow = useShadow();
+  return (
+    <View className={`rounded-3xl p-6 items-center gap-3 ${tone.card}`} style={shadow('hero')}>
+      <View className="w-20 h-20 rounded-full bg-primary-fixed dark:bg-[#1C382B] items-center justify-center mb-1">
+        <Icon name="radar" filled className="text-[40px] text-primary" />
+      </View>
+      <Text className="font-headline-md text-headline-md text-on-surface text-center">Your radar is ready</Text>
+      <Text className="font-body-md text-body-md text-on-surface-variant text-center">
+        Scan barcodes as you unpack groceries, or add a few items by hand. The radar estimates every date and nudges you before anything spoils.
+      </Text>
+      <Pressable onPress={() => router.push('/scan')} className="w-full h-12 mt-2 rounded-full bg-primary flex-row items-center justify-center gap-2 active:scale-[0.98]" style={shadow('primaryButton')}>
+        <Icon name="barcode_scanner" className="text-[20px] text-on-primary" />
+        <Text className="font-label-lg text-label-lg text-on-primary">Scan Groceries</Text>
+      </Pressable>
+      <Pressable onPress={() => router.push('/add-item')} className="w-full h-12 rounded-full bg-surface-container dark:bg-surface-container-high flex-row items-center justify-center gap-2">
+        <Icon name="add_circle" className="text-[20px] text-primary" />
+        <Text className="font-label-lg text-label-lg text-on-surface">Add an Item</Text>
+      </Pressable>
+      <Pressable onPress={() => seedDemoKitchen(true)} className="py-2">
+        <Text className="font-label-md text-label-md text-primary">Just exploring? Load a sample kitchen</Text>
+      </Pressable>
+    </View>
   );
 }

@@ -9,12 +9,12 @@ import { ToastBanner } from '@/components/toast-banner';
 import { Icon } from '@/components/ui/icon';
 import { Text, TextInput } from '@/components/ui/text';
 import { UrgencyPill } from '@/components/urgency';
-import { getRecipe } from '@/data/recipes';
 import { zones } from '@/domain/categories';
 import { today } from '@/domain/dates';
 import { daysLeft, expiryBadge, needsAttention, urgencyFor } from '@/domain/expiry';
 import type { PantryItem, Urgency, Zone } from '@/domain/types';
-import { markUsed, restoreItem, undoLastCook, useActiveItems } from '@/store/pantry';
+import { markUsed, restoreItem, useActiveItems, useItems } from '@/store/pantry';
+import { restockSuggestions, useRestock } from '@/store/restock';
 import { useShadow } from '@/theme/shadows';
 import { useTheme } from '@/theme/theme-provider';
 import { tone } from '@/theme/tones';
@@ -37,33 +37,26 @@ const PILL_TEXT: Record<Urgency, string> = {
   fresh: 'text-on-primary-fixed-variant dark:text-primary',
 };
 
-type Toast =
-  | { kind: 'used'; item: PantryItem }
-  | { kind: 'cooked'; recipeTitle: string; count: number; grams: number };
+type Toast = { kind: 'used'; item: PantryItem };
 
 export default function InventoryScreen() {
   const shadow = useShadow();
-  const params = useLocalSearchParams<{ filter?: Filter; cooked?: string; count?: string; grams?: string; at?: string }>();
+  const params = useLocalSearchParams<{ filter?: Filter }>();
   const items = useActiveItems();
+  const allItems = useItems();
+  const restock = useRestock();
+  const restockCount = restock.entries.filter((entry) => !entry.inCart).length + restockSuggestions(allItems, restock).length;
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<Filter>(params.filter ?? 'all');
   const [sort, setSort] = useState<Sort>('expiry');
   const [grid, setGrid] = useState(false);
   const [toast, setToast] = useState<Toast | undefined>();
 
-  // Navigation params (filter link, "just cooked" banner) are applied once per arrival.
+  // A filter link (e.g. from the attention banner elsewhere) is applied once per arrival.
   const [seenFilter, setSeenFilter] = useState(params.filter);
   if (params.filter !== seenFilter) {
     setSeenFilter(params.filter);
     if (params.filter) setFilter(params.filter);
-  }
-  const [seenCook, setSeenCook] = useState<string | undefined>();
-  if (params.cooked && params.at !== seenCook) {
-    setSeenCook(params.at);
-    const recipe = getRecipe(params.cooked);
-    if (recipe) {
-      setToast({ kind: 'cooked', recipeTitle: recipe.title, count: Number(params.count ?? 0), grams: Number(params.grams ?? 0) });
-    }
   }
 
   const now = today();
@@ -100,31 +93,6 @@ export default function InventoryScreen() {
         className="flex-1"
         keyboardShouldPersistTaps="handled"
         contentContainerClassName="w-full max-w-[480px] self-center px-margin pt-1 pb-8 gap-space-md">
-        {toast?.kind === 'cooked' && (
-          <ToastBanner
-            icon="skillet"
-            title="Pantry updated!"
-            body={
-              <>
-                {toast.count} {toast.count === 1 ? 'ingredient' : 'ingredients'} auto-adjusted after cooking{' '}
-                <Text className="font-label-md text-label-md text-on-primary-fixed-variant dark:text-on-surface-variant">
-                  {toast.recipeTitle}
-                </Text>
-                .
-              </>
-            }
-            footnote={toast.grams > 0 ? `Saved ~${toast.grams}g food waste` : undefined}
-            onUndo={
-              toast.count > 0
-                ? () => {
-                    undoLastCook();
-                    setToast(undefined);
-                  }
-                : undefined
-            }
-            onDismiss={() => setToast(undefined)}
-          />
-        )}
         {toast?.kind === 'used' && (
           <ToastBanner
             icon="check_circle"
@@ -183,7 +151,7 @@ export default function InventoryScreen() {
             <Text className="font-label-sm text-label-sm text-on-surface">
               Sort by: <Text className="font-label-sm text-label-sm font-semibold text-primary">{SORTS[sort]}</Text>
             </Text>
-            <Icon name="expand_more" className="text-[16px] text-outline" />
+            <Icon name="expand_more" className="text-[16px] text-outline dark:text-on-surface-variant" />
           </Pressable>
           <View className="flex-row items-center bg-surface-container-low dark:bg-surface-container p-1 rounded-full">
             <Pressable
@@ -191,14 +159,14 @@ export default function InventoryScreen() {
               onPress={() => setGrid(false)}
               className={`w-7 h-7 rounded-full items-center justify-center ${!grid ? 'bg-surface-container-lowest dark:bg-surface-container-highest' : ''}`}
               style={!grid ? shadow('sm') : undefined}>
-              <Icon name="view_list" className={`text-[18px] ${!grid ? 'text-primary' : 'text-outline'}`} />
+              <Icon name="view_list" className={`text-[18px] ${!grid ? 'text-primary' : 'text-outline dark:text-on-surface-variant'}`} />
             </Pressable>
             <Pressable
               accessibilityLabel="Grid layout"
               onPress={() => setGrid(true)}
               className={`w-7 h-7 rounded-full items-center justify-center ${grid ? 'bg-surface-container-lowest dark:bg-surface-container-highest' : ''}`}
               style={grid ? shadow('sm') : undefined}>
-              <Icon name="grid_view" className={`text-[18px] ${grid ? 'text-primary' : 'text-outline'}`} />
+              <Icon name="grid_view" className={`text-[18px] ${grid ? 'text-primary' : 'text-outline dark:text-on-surface-variant'}`} />
             </Pressable>
           </View>
         </View>
@@ -235,14 +203,21 @@ export default function InventoryScreen() {
           </View>
         )}
 
-        {/* Manual Add Action Callout */}
-        <View className="pt-2">
+        {/* Restock + manual add (updated_pantry_inventory footer) */}
+        <View className="pt-2 flex-row gap-3">
+          <Pressable
+            onPress={() => router.push('/restock')}
+            className={`flex-row items-center justify-center gap-2 py-3.5 px-4 rounded-full ${tone.card}`}
+            style={shadow('sm')}>
+            <Icon name="checklist" className="text-[20px] text-on-surface" />
+            <Text className="font-label-md text-label-md text-on-surface">Restock{restockCount ? ` (${restockCount})` : ''}</Text>
+          </Pressable>
           <Pressable
             onPress={() => router.push('/add-item')}
-            className="w-full flex-row items-center justify-center gap-2 py-3.5 px-4 rounded-full bg-surface-container dark:bg-surface-container-high active:scale-[0.98]"
-            style={shadow('sm')}>
-            <Icon name="add_circle" className="text-[20px] text-primary" />
-            <Text className="font-label-lg text-label-lg text-on-surface">+ Add Item Manually</Text>
+            className="flex-1 flex-row items-center justify-center gap-2 py-3.5 px-4 rounded-full bg-primary active:scale-[0.98]"
+            style={shadow('primaryButton')}>
+            <Icon name="add" className="text-[20px] text-on-primary" />
+            <Text className="font-label-lg text-label-lg text-on-primary">Add Item Manually</Text>
           </Pressable>
         </View>
       </ScrollView>
@@ -317,7 +292,7 @@ function AttentionBanner({ count, onPress }: { count: number; onPress: () => voi
               </Text>
             </View>
           </View>
-          <Icon name="chevron_right" className="text-[20px] text-outline" />
+          <Icon name="chevron_right" className="text-[20px] text-outline dark:text-on-surface-variant" />
         </View>
       </LinearGradient>
     </Pressable>
@@ -383,7 +358,7 @@ function ItemCard({ item, onUsed }: { item: PantryItem; onUsed: () => void }) {
       <View className="flex-col items-end gap-2 shrink-0 ml-2">
         <UrgencyPill urgency={urgency} label={expiryBadge(days)} className="px-2.5" textClassName={PILL_TEXT[urgency]} />
         <Pressable accessibilityLabel={`Mark ${item.name} used`} onPress={onUsed} hitSlop={10} className="active:scale-95">
-          <Icon name="check_circle" className="text-[20px] text-outline" />
+          <Icon name="check_circle" className="text-[20px] text-outline dark:text-on-surface-variant" />
         </Pressable>
       </View>
     </Pressable>

@@ -66,7 +66,7 @@ export default function ScanReviewScreen() {
       <View className="flex-1 bg-surface">
         <AppHeader page="Inventory" />
         <View className="flex-1 items-center justify-center px-8 gap-3">
-          <Icon name="barcode_scanner" className="text-[40px] text-outline" />
+          <Icon name="barcode_scanner" className="text-[40px] text-outline dark:text-on-surface-variant" />
           <Text className="font-headline-sm text-headline-sm text-on-surface">Nothing to review</Text>
           <Pressable onPress={() => router.replace('/scan')} className="px-5 h-11 rounded-full bg-primary items-center justify-center">
             <Text className="font-label-lg text-label-lg text-on-primary">Start scanning</Text>
@@ -353,8 +353,8 @@ function ExcludedCard({ entry }: { entry: ScanEntry }) {
                 {entry.draft.name}
               </Text>
               <View className="flex-row items-center gap-1 mt-0.5">
-                <Icon name="scan" className="text-[14px] text-outline" />
-                <Text className="font-label-sm text-label-sm text-outline font-medium">Non-food detected</Text>
+                <Icon name="scan" className="text-[14px] text-outline dark:text-on-surface-variant" />
+                <Text className="font-label-sm text-label-sm text-outline dark:text-on-surface-variant font-medium">Non-food detected</Text>
               </View>
             </View>
             <View className="px-2 py-0.5 rounded-full bg-surface-container-highest">

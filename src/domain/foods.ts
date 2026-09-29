@@ -96,7 +96,7 @@ export const foods: FoodProfile[] = [
   {
     key: 'apple',
     emoji: '🍎',
-    pattern: /apple(?!\s*juice)/i,
+    pattern: /\bapples?\b(?!\s*juice)/i,
     category: 'produce',
     zone: 'fridge',
     shelfLife: { fridge: { min: 21, max: 42 }, pantry: { min: 7, max: 14 } },
@@ -242,7 +242,7 @@ export const foods: FoodProfile[] = [
   {
     key: 'butter',
     emoji: '🧈',
-    pattern: /butter(?!milk)/i,
+    pattern: /\bbutter\b(?!milk)/i,
     category: 'dairy',
     zone: 'fridge',
     shelfLife: { fridge: { min: 30, max: 90 } },
@@ -262,7 +262,7 @@ export const foods: FoodProfile[] = [
   {
     key: 'meat',
     emoji: '🥩',
-    pattern: /beef|steak|pork|lamb|ground|sausage|bacon/i,
+    pattern: /\b(beef|steak|pork|lamb|ground (beef|turkey|pork|meat)|sausages?|bacon)\b/i,
     category: 'proteins',
     zone: 'fridge',
     shelfLife: { fridge: { min: 2, max: 4 }, freezer: { min: 120, max: 180 } },

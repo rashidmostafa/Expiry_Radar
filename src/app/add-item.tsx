@@ -75,7 +75,7 @@ export default function AddItemScreen() {
   const editing = params.id ? getItem(params.id) : undefined;
   const insets = useSafeAreaInsets();
   const shadow = useShadow();
-  const { alertDaysBefore } = useSettings();
+  const { alertDaysBefore, zoneDefaults } = useSettings();
 
   const [form, setForm] = useState<Form>(() => (editing ? formFromItem(editing) : emptyForm(params.name, params.detail)));
   const [dateSheet, setDateSheet] = useState<'purchased' | 'expires' | undefined>();
@@ -85,7 +85,7 @@ export default function AddItemScreen() {
   // "Auto-detect": until the user chooses, the name drives category, zone and shelf life.
   const food = findFood(form.name);
   const category = form.category ?? food?.category;
-  const recommendedZone = food?.zone ?? (category ? categories[category].zone : 'fridge');
+  const recommendedZone = (category && zoneDefaults[category]) ?? food?.zone ?? (category ? categories[category].zone : 'fridge');
   const zone = form.zone ?? recommendedZone;
   const life = shelfLifeFor(category ?? 'other', zone, food);
   const suggestedExpiry = addDays(form.purchasedOn, life.min);

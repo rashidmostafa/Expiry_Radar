@@ -15,7 +15,7 @@ import { Sheet, SheetOption } from '@/components/ui/sheet';
 import { Text } from '@/components/ui/text';
 import { daysBetween, formatShort, today } from '@/domain/dates';
 import { lookupBarcode } from '@/services/barcode';
-import { draftsFromReceipt, readReceipt, ReceiptServiceUnavailable } from '@/services/receipt';
+import { draftsFromReceipt, readReceipt, ReceiptReadError, ReceiptServiceUnavailable } from '@/services/receipt';
 import { draftFromName, useItems } from '@/store/pantry';
 import { addEntry, clearSession, entryKey, getSession, startSession, useScanSession } from '@/store/scan-session';
 import { useShadow } from '@/theme/shadows';
@@ -43,7 +43,7 @@ export default function ScanScreen() {
   const [torch, setTorch] = useState(false);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | undefined>();
-  const [receiptSheet, setReceiptSheet] = useState(false);
+  const [receiptSheet, setReceiptSheet] = useState<'signed-out' | 'not-configured' | undefined>();
   const [historySheet, setHistorySheet] = useState(false);
   const seen = useRef(new Set<string>());
 
@@ -87,13 +87,14 @@ export default function ScanScreen() {
       const receipt = await readReceipt(image);
       startSession({
         source: 'receipt',
-        store: receipt.store,
-        date: receipt.date,
+        store: receipt.store ?? undefined,
+        date: receipt.date ?? undefined,
         entries: draftsFromReceipt(receipt).map(({ draft, excluded }) => ({ key: entryKey(), draft, selected: !excluded, excluded })),
       });
       router.replace('/scan-review');
     } catch (error) {
-      if (error instanceof ReceiptServiceUnavailable) setReceiptSheet(true);
+      if (error instanceof ReceiptServiceUnavailable) setReceiptSheet(error.reason);
+      else if (error instanceof ReceiptReadError) setNotice(error.message);
       else setNotice('That receipt was hard to read. Try again in brighter light, or scan barcodes instead.');
     } finally {
       setBusy(false);
@@ -293,9 +294,20 @@ export default function ScanScreen() {
         )}
       </ScrollView>
 
-      <Sheet visible={receiptSheet} onClose={() => setReceiptSheet(false)} title="Receipt reading is almost here" subtitle="Reading receipts uses our AI service, which isn't connected in this build yet.">
-        <SheetOption icon="barcode_scanner" label="Scan barcodes instead" detail="Works right now, item by item" onPress={() => { setReceiptSheet(false); setMode('barcode'); }} />
-        <SheetOption icon="edit_note" label="Add items manually" detail="Smart defaults fill in the dates" onPress={() => { setReceiptSheet(false); router.replace('/add-item'); }} />
+      <Sheet
+        visible={!!receiptSheet}
+        onClose={() => setReceiptSheet(undefined)}
+        title={receiptSheet === 'signed-out' ? 'Sign in to read receipts' : 'Receipt reading is almost here'}
+        subtitle={
+          receiptSheet === 'signed-out'
+            ? 'Receipts are read by our AI service, which needs a free account. Your pantry stays on this device either way.'
+            : 'Reading receipts uses our AI service, which isn’t connected in this build yet.'
+        }>
+        {receiptSheet === 'signed-out' && (
+          <SheetOption icon="login" label="Log in or create an account" detail="Takes less than a minute" onPress={() => { setReceiptSheet(undefined); router.push('/auth/login'); }} />
+        )}
+        <SheetOption icon="barcode_scanner" label="Scan barcodes instead" detail="Works right now, item by item" onPress={() => { setReceiptSheet(undefined); setMode('barcode'); }} />
+        <SheetOption icon="edit_note" label="Add items manually" detail="Smart defaults fill in the dates" onPress={() => { setReceiptSheet(undefined); router.replace('/add-item'); }} />
       </Sheet>
 
       <Sheet visible={historySheet} onClose={() => setHistorySheet(false)} title="Recent scans" subtitle={scanned.length === 0 ? 'Nothing scanned yet.' : undefined}>

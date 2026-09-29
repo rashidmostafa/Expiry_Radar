@@ -1,8 +1,13 @@
+import { Redirect } from 'expo-router';
 import { TabList, TabSlot, Tabs, TabTrigger } from 'expo-router/ui';
 
 import { BottomNav, tabs } from '@/components/bottom-nav';
+import { useSettings } from '@/store/settings';
 
 export default function TabLayout() {
+  const { onboarded } = useSettings();
+  if (!onboarded) return <Redirect href="/welcome" />;
+
   return (
     <Tabs style={{ flex: 1 }}>
       {/* TabSlot's container is flexShrink: 0 by default; let it shrink so screens scroll above the nav. */}

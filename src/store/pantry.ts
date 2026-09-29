@@ -6,9 +6,10 @@ import { addDays, daysBetween, today } from '@/domain/dates';
 import { byExpiry } from '@/domain/expiry';
 import { findFood, shelfLifeFor } from '@/domain/foods';
 import type { ItemEvent, ItemEventType, NewPantryItem, PantryItem } from '@/domain/types';
-import { cancelExpiryNudge, scheduleExpiryNudge } from '@/services/notifications';
+import { cancelExpiryNudge, planDigests, scheduleExpiryNudge } from '@/services/notifications';
 
 import * as persistence from './persistence';
+import { getSettings } from './settings';
 
 type State = { items: PantryItem[]; events: ItemEvent[] };
 
@@ -27,6 +28,62 @@ function subscribe(listener: () => void) {
 
 const getState = () => state;
 
+// ─── Sync hooks ─────────────────────────────────────────────────────────────
+// Local edits are reported so services/sync can push them to the household; remote edits come
+// back through applyRemote, which does not report them again.
+
+export type LocalChange = { items?: string[]; events?: string[]; deletedItems?: string[]; deletedEvents?: string[] };
+const changeListeners = new Set<(change: LocalChange) => void>();
+
+export function onLocalChange(listener: (change: LocalChange) => void) {
+  changeListeners.add(listener);
+  return () => {
+    changeListeners.delete(listener);
+  };
+}
+
+function reportChange(change: LocalChange) {
+  changeListeners.forEach((listener) => listener(change));
+}
+
+export function getSnapshot() {
+  return state;
+}
+
+/** Merges records from the household (last write wins on updatedAt). */
+export function applyRemote(remote: { items?: PantryItem[]; events?: ItemEvent[]; deletedItems?: string[]; deletedEvents?: string[] }) {
+  const items = new Map(state.items.map((item) => [item.id, item]));
+  const accepted = (remote.items ?? []).filter((item) => {
+    const local = items.get(item.id);
+    return !local || local.updatedAt < item.updatedAt;
+  });
+  for (const item of accepted) items.set(item.id, item);
+  for (const id of remote.deletedItems ?? []) items.delete(id);
+
+  const known = new Set(state.events.map((event) => event.id));
+  const newEvents = (remote.events ?? []).filter((event) => !known.has(event.id));
+  const deletedEvents = new Set(remote.deletedEvents ?? []);
+  if (accepted.length === 0 && newEvents.length === 0 && !remote.deletedItems?.length && deletedEvents.size === 0) return;
+
+  if (accepted.length) persistence.saveItems(accepted);
+  (remote.deletedItems ?? []).forEach((id) => {
+    persistence.deleteItem(id);
+    cancelExpiryNudge(id);
+  });
+  if (newEvents.length) persistence.saveEvents(newEvents);
+  deletedEvents.forEach((id) => persistence.deleteEvent(id));
+
+  emit({
+    items: [...items.values()],
+    events: [...newEvents, ...state.events.filter((event) => !deletedEvents.has(event.id))].sort((a, b) => b.at.localeCompare(a.at)),
+  });
+  for (const item of accepted) {
+    if (item.status === 'active' && item.alertEnabled) scheduleExpiryNudge(item);
+    else cancelExpiryNudge(item.id);
+  }
+  scheduleDigestPlan();
+}
+
 function now() {
   return new Date().toISOString();
 }
@@ -40,9 +97,19 @@ function commitItems(changed: PantryItem[]) {
     if (item.status === 'active' && item.alertEnabled) scheduleExpiryNudge(item);
     else cancelExpiryNudge(item.id);
   }
+  scheduleDigestPlan();
+  reportChange({ items: changed.map((item) => item.id) });
 }
 
-function recordEvent(item: PantryItem, type: ItemEventType, fraction: number): ItemEvent {
+let digestTimer: ReturnType<typeof setTimeout> | undefined;
+
+/** Debounced so a batch of changes (scan review, cooking) re-plans once. */
+function scheduleDigestPlan() {
+  clearTimeout(digestTimer);
+  digestTimer = setTimeout(() => planDigests(state.items), 1500);
+}
+
+function recordEvent(item: PantryItem, type: ItemEventType, fraction: number, recipeId?: string): ItemEvent {
   const food = findFood(item.name);
   const valueCents = item.priceCents ?? food?.priceCents ?? 0;
   const grams = item.weightGrams ?? food?.grams ?? 0;
@@ -55,9 +122,13 @@ function recordEvent(item: PantryItem, type: ItemEventType, fraction: number): I
     valueCents: Math.round(valueCents * fraction),
     grams: Math.round(grams * fraction),
     at: now(),
+    category: item.category,
+    daysLeft: daysBetween(today(), item.expiresOn),
+    recipeId,
   };
   persistence.saveEvents([event]);
   emit({ ...state, events: [event, ...state.events] });
+  reportChange({ events: [event.id] });
   return event;
 }
 
@@ -116,12 +187,12 @@ export function markUsed(id: string) {
 }
 
 /** Used part of it; the rest stays tracked. */
-export function consumePortion(id: string, percent: number) {
+export function consumePortion(id: string, percent: number, recipeId?: string) {
   const item = getItem(id);
   if (!item) return;
   const used = Math.min(item.remainingPct, percent);
   const remainingPct = item.remainingPct - used;
-  recordEvent(item, remainingPct === 0 ? 'used' : 'used_partial', used / 100);
+  recordEvent(item, remainingPct === 0 ? 'used' : 'used_partial', used / 100, recipeId);
   commitItems([
     {
       ...item,
@@ -163,46 +234,93 @@ export function restoreItem(id: string, previous: PantryItem) {
   const events = state.events.filter((event) => event.itemId === id && event.at >= previous.updatedAt);
   events.forEach((event) => persistence.deleteEvent(event.id));
   emit({ ...state, events: state.events.filter((event) => !events.includes(event)) });
+  reportChange({ deletedEvents: events.map((event) => event.id) });
   commitItems([{ ...previous, updatedAt: now() }]);
 }
 
 let lastCook: PantryItem[] = [];
 
+export type CookResult = {
+  grams: number;
+  /** Value of the at-risk (not fresh) food that got used. */
+  rescuedCents: number;
+  rescuedItems: number;
+  deducted: { before: PantryItem; after: PantryItem | undefined; percent: number }[];
+};
+
+let lastCookResult: CookResult | undefined;
+
 /** Deducts cooked portions (percent of each item) in one step that "Undo" can reverse. */
-export function cookDeductions(deductions: { id: string; percent: number }[]) {
+export function cookDeductions(deductions: { id: string; percent: number }[], recipeId?: string): CookResult {
   lastCook = deductions.map(({ id }) => getItem(id)).filter((item): item is PantryItem => !!item);
-  let grams = 0;
+  const result: CookResult = { grams: 0, rescuedCents: 0, rescuedItems: 0, deducted: [] };
   for (const { id, percent } of deductions) {
-    const item = getItem(id);
-    if (!item) continue;
-    grams += Math.round(((item.weightGrams ?? findFood(item.name)?.grams ?? 0) * Math.min(percent, item.remainingPct)) / 100);
-    consumePortion(id, percent);
+    const before = getItem(id);
+    if (!before) continue;
+    const food = findFood(before.name);
+    const used = Math.min(percent, before.remainingPct);
+    result.grams += Math.round(((before.weightGrams ?? food?.grams ?? 0) * used) / 100);
+    if (daysBetween(today(), before.expiresOn) <= 4) {
+      result.rescuedItems += 1;
+      result.rescuedCents += before.priceCents ?? food?.priceCents ?? 0;
+    }
+    consumePortion(id, percent, recipeId);
+    result.deducted.push({ before, after: getItem(id), percent: used });
   }
-  return grams;
+  lastCookResult = result;
+  return result;
+}
+
+/** Result of the most recent cook, for the "cooking complete" screen. */
+export function getLastCook() {
+  return lastCookResult;
 }
 
 export function undoLastCook() {
   for (const item of lastCook) restoreItem(item.id, item);
   lastCook = [];
+  lastCookResult = undefined;
 }
 
-/** Re-plans every nudge, e.g. after the alert timing settings change. */
+/** Re-plans every notification, e.g. at launch or after alert settings change. */
 export function rescheduleNudges() {
   for (const item of state.items) {
     if (item.status === 'active' && item.alertEnabled) scheduleExpiryNudge(item);
   }
+  scheduleDigestPlan();
 }
 
 /** Adds past ledger entries (imports, demo history). */
 export function importEvents(events: ItemEvent[]) {
   persistence.saveEvents(events);
   emit({ ...state, events: [...events, ...state.events].sort((a, b) => b.at.localeCompare(a.at)) });
+  reportChange({ events: events.map((event) => event.id) });
+}
+
+/** Pantry Settings → "Wipe Pantry Data": removes every item and ledger entry on this device. */
+export function wipeAllData() {
+  for (const item of state.items) {
+    persistence.deleteItem(item.id);
+    cancelExpiryNudge(item.id);
+  }
+  for (const event of state.events) persistence.deleteEvent(event.id);
+  emit({ items: [], events: [] });
+}
+
+/** Pantry Settings → "Clear expired history": drops finished items older than 90 days. */
+export function clearOldHistory(days = 90) {
+  const cutoff = new Date(Date.now() - days * 86_400_000).toISOString();
+  const stale = state.items.filter((item) => item.status !== 'active' && (item.resolvedAt ?? item.updatedAt) < cutoff);
+  stale.forEach((item) => persistence.deleteItem(item.id));
+  emit({ ...state, items: state.items.filter((item) => !stale.includes(item)) });
+  return stale.length;
 }
 
 export function removeItem(id: string) {
   persistence.deleteItem(id);
   cancelExpiryNudge(id);
   emit({ ...state, items: state.items.filter((item) => item.id !== id) });
+  reportChange({ deletedItems: [id] });
 }
 
 // ─── Draft helpers ──────────────────────────────────────────────────────────
@@ -211,7 +329,8 @@ export function removeItem(id: string) {
 export function draftFromName(name: string, overrides: Partial<NewPantryItem> = {}): NewPantryItem {
   const food = findFood(name);
   const category = overrides.category ?? food?.category ?? 'other';
-  const zone = overrides.zone ?? food?.zone ?? categories[category].zone;
+  // The user's Auto-Zone rule for the category beats the built-in default.
+  const zone = overrides.zone ?? getSettings().zoneDefaults[category] ?? food?.zone ?? categories[category].zone;
   const purchasedOn = overrides.purchasedOn ?? today();
   const life = shelfLifeFor(category, zone, food);
   return {

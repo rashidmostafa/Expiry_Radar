@@ -6,9 +6,9 @@ import { imageSource } from '@/data/images';
 import { useSettings } from '@/store/settings';
 
 /** Profile photo, or the user's initial on a soft green disc when there is none. */
-export function Avatar({ size = 32, className = '' }: { size?: number; className?: string }) {
+export function Avatar({ size = 32, className = '', image }: { size?: number; className?: string; /** Preview an unsaved photo. */ image?: string }) {
   const { avatar, userName } = useSettings();
-  const source = imageSource(avatar);
+  const source = imageSource(image ?? avatar);
   if (source) {
     return (
       <Image

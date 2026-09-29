@@ -7,6 +7,8 @@ export async function scheduleExpiryNudge(_item: PantryItem) {}
 
 export async function cancelExpiryNudge(_itemId: string) {}
 
-export function onNudgeOpened(_open: (itemId: string) => void) {
+export async function planDigests(_items: PantryItem[]) {}
+
+export function onNotificationOpened(_open: (href: string) => void) {
   return () => {};
 }

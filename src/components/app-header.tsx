@@ -7,6 +7,7 @@ import { Avatar } from '@/components/avatar';
 import { Logo } from '@/components/logo';
 import { Icon } from '@/components/ui/icon';
 import { Text } from '@/components/ui/text';
+import { useNudges } from '@/store/use-nudges';
 import { useShadow } from '@/theme/shadows';
 
 /**
@@ -31,12 +32,7 @@ export function AppHeader({ page, right }: { page: string; right?: ReactNode }) 
         <View className="flex-row items-center gap-space-xs">
           {right ?? (
             <>
-              <Pressable
-                accessibilityLabel="Notifications"
-                onPress={() => router.navigate('/inventory')}
-                className="w-11 h-11 rounded-full items-center justify-center">
-                <Icon name="notifications" className="text-[22px] text-on-surface-variant" />
-              </Pressable>
+              <BellButton />
               <Pressable
                 accessibilityLabel="Profile"
                 onPress={() => router.navigate('/profile')}
@@ -74,5 +70,20 @@ export function FlowHeader({ title, right }: { title: string; right?: ReactNode 
         <View className="flex-row items-center gap-space-xs">{right}</View>
       </View>
     </View>
+  );
+}
+
+function BellButton() {
+  const { unseenIds } = useNudges();
+  return (
+    <Pressable
+      accessibilityLabel={unseenIds.length ? `Smart nudges, ${unseenIds.length} new` : 'Smart nudges'}
+      onPress={() => router.push('/nudges')}
+      className="w-11 h-11 rounded-full items-center justify-center">
+      <Icon name="notifications" className="text-[22px] text-on-surface-variant" />
+      {unseenIds.length > 0 && (
+        <View className="absolute top-2.5 right-3 w-2.5 h-2.5 rounded-full bg-secondary-container dark:bg-secondary border-2 border-surface" />
+      )}
+    </Pressable>
   );
 }

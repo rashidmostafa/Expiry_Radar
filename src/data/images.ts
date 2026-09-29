@@ -21,6 +21,8 @@ const bundled: Record<string, ImageSource> = {
   'french-toast-bake': require('@/assets/images/recipes/french-toast-bake.jpg'),
   'garlic-spinach': require('@/assets/images/recipes/garlic-spinach.jpg'),
   receipt: require('@/assets/images/misc/receipt.jpg'),
+  'onboarding-groceries': require('@/assets/images/misc/onboarding-groceries.jpg'),
+  'pantry-shelf': require('@/assets/images/misc/pantry-shelf.jpg'),
   avatar: require('@/assets/images/misc/avatar-demo.jpg'),
 };
 
